@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 
 import com.facebook.react.bridge.ReactContext;
 import com.wix.reactnativenotifications.core.AppLaunchHelper;
@@ -18,6 +19,7 @@ import com.wix.reactnativenotifications.core.InitialNotificationHolder;
 import com.wix.reactnativenotifications.core.JsIOHelper;
 import com.wix.reactnativenotifications.core.NotificationIntentAdapter;
 
+import static com.wix.reactnativenotifications.Defs.LOGTAG;
 import static com.wix.reactnativenotifications.Defs.NOTIFICATION_OPENED_EVENT_NAME;
 import static com.wix.reactnativenotifications.Defs.NOTIFICATION_RECEIVED_EVENT_NAME;
 import static com.wix.reactnativenotifications.Defs.NOTIFICATION_RECEIVED_BACKGROUND_EVENT_NAME;
@@ -63,7 +65,7 @@ public class PushNotification implements IPushNotification {
     @Override
     public void onReceived() throws InvalidNotificationException {
         if (!mAppLifecycleFacade.isAppVisible()) {
-            postNotification(null);
+            postNotification((Notification) null,null);
             notifyReceivedBackgroundToJS();
         } else {
             notifyReceivedToJS();
@@ -73,11 +75,12 @@ public class PushNotification implements IPushNotification {
     @Override
     public void onOpened() {
         digestNotification();
+        clearAllNotifications();
     }
 
     @Override
-    public int onPostRequest(Integer notificationId) {
-        return postNotification(notificationId);
+    public int onPostRequest(Integer notificationId,String channelID) {
+        return postNotification(notificationId,channelID);
     }
 
     @Override
@@ -85,12 +88,12 @@ public class PushNotification implements IPushNotification {
         return mNotificationProps.copy();
     }
 
-    protected int postNotification(Integer notificationId) {
+    protected int postNotification(Integer notificationId,String channelID) {
         if (mNotificationProps.isDataOnlyPushNotification()) {
             return -1;
         }
         final PendingIntent pendingIntent = NotificationIntentAdapter.createPendingNotificationIntent(mContext, mNotificationProps);;
-        final Notification notification = buildNotification(pendingIntent);
+        final Notification notification = buildNotification(pendingIntent, channelID);
         return postNotification(notification, notificationId);
     }
 
@@ -108,8 +111,6 @@ public class PushNotification implements IPushNotification {
 
         if (mAppLifecycleFacade.isAppVisible()) {
             dispatchImmediately();
-        } else if (mAppLifecycleFacade.isAppDestroyed()) {
-            launchOrResumeApp();
         } else {
             dispatchUponVisibility();
         }
@@ -139,11 +140,11 @@ public class PushNotification implements IPushNotification {
         return mAppVisibilityListener;
     }
 
-    protected Notification buildNotification(PendingIntent intent) {
-        return getNotificationBuilder(intent).build();
+    protected Notification buildNotification(PendingIntent intent,String channelID) {
+        return getNotificationBuilder(intent,channelID).build();
     }
 
-    protected Notification.Builder getNotificationBuilder(PendingIntent intent) {
+    protected Notification.Builder getNotificationBuilder(PendingIntent intent,String channelID) {
         final Notification.Builder notification = new Notification.Builder(mContext)
                 .setContentTitle(mNotificationProps.getTitle())
                 .setContentText(mNotificationProps.getBody())
@@ -154,10 +155,14 @@ public class PushNotification implements IPushNotification {
         setUpIcon(notification);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-            String channelId = mNotificationProps.getChannelId();
-            NotificationChannel channel = notificationManager.getNotificationChannel(channelId);
-            notification.setChannelId(channel != null ? channelId : DEFAULT_CHANNEL_ID);
+            if(channelID==null){
+                final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+                String channelId = mNotificationProps.getChannelId();
+                NotificationChannel channel = notificationManager.getNotificationChannel(channelId);
+                notification.setChannelId(channel != null ? channelId : DEFAULT_CHANNEL_ID);
+            }else{
+                notification.setChannelId(channelID);
+            }
         }
 
         return notification;
@@ -193,6 +198,11 @@ public class PushNotification implements IPushNotification {
         notificationManager.notify(id, notification);
     }
 
+    protected void clearAllNotifications() {
+        final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+        notificationManager.cancelAll();
+    }
+
     protected int createNotificationId(Notification notification) {
         return (int) System.nanoTime();
     }
@@ -207,9 +217,12 @@ public class PushNotification implements IPushNotification {
 
     private void notifyOpenedToJS() {
         Bundle response = new Bundle();
-        response.putBundle("notification", mNotificationProps.asBundle());
-
-        mJsIOHelper.sendEventToJS(NOTIFICATION_OPENED_EVENT_NAME, response, mAppLifecycleFacade.getRunningReactContext());
+        try {
+            response.putBundle("notification", mNotificationProps.asBundle());
+            mJsIOHelper.sendEventToJS(NOTIFICATION_OPENED_EVENT_NAME, response, mAppLifecycleFacade.getRunningReactContext());
+        } catch (NullPointerException error) {
+            Log.e(LOGTAG, "notifyOpenedToJS: Null pointer exception");
+        }
     }
 
     protected void launchOrResumeApp() {
