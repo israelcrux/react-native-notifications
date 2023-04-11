@@ -155,14 +155,16 @@ public class PushNotification implements IPushNotification {
         setUpIcon(notification);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if(channelID==null){
-                final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-                String channelId = mNotificationProps.getChannelId();
-                NotificationChannel channel = notificationManager.getNotificationChannel(channelId);
-                notification.setChannelId(channel != null ? channelId : DEFAULT_CHANNEL_ID);
-            }else{
-                notification.setChannelId(channelID);
+            final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
+            String providedChannel = mNotificationProps.getChannelId();
+            String finalChannelID = providedChannel != null ? providedChannel : ( channelID != null ? channelID : DEFAULT_CHANNEL_ID);
+            NotificationChannel channel = notificationManager.getNotificationChannel(finalChannelID);
+            if(channel == null){
+              channel = new NotificationChannel(finalChannelID, finalChannelID, NotificationManager.IMPORTANCE_DEFAULT);
+              notificationManager.createNotificationChannel(channel);
             }
+            notification.setChannelId(finalChannelID);
         }
 
         return notification;
